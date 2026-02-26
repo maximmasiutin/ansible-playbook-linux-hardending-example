@@ -280,7 +280,7 @@
         regexp: '^\s*#?PasswordAuthentication\s+.*$'
         replace: 'PasswordAuthentication no'
 
-    - name: "SSH disable root login"
+    - name: "C2S/CIS CCE-80901-2 SSH disable root login"
       ansible.builtin.replace:
         path: /etc/ssh/sshd_config
         regexp: '^\s*#?PermitRootLogin\s+.*$'

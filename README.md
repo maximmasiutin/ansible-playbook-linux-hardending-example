@@ -1,6 +1,12 @@
-# Ansible Lab #1: Multi-Distro System Hardening
+# Example Ansible Playbook: Multi-Distro System Hardening
 
-Vagrant/VirtualBox lab applying [CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks/), [CCE](https://nvd.nist.gov/config/cce/index), and [C2S](https://aws.amazon.com/compliance/c2s-resources/) hardening controls across four Linux distributions via a single Ansible playbook.
+Vagrant/VirtualBox lab applying CIS, CCE, and C2S hardening controls across four Linux distributions via a single Ansible playbook.
+
+## Standards Referenced
+
+- **[CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks/)** (Center for Internet Security) -- consensus-based security configuration guidelines developed by government, industry, and academia. CIS publishes hardening profiles for operating systems, middleware, and applications.
+- **[CCE](https://ncp.nist.gov/cce)** (Common Configuration Enumeration) -- a NIST-maintained scheme assigning unique identifiers (e.g., CCE-80901-2) to discrete system configuration settings, enabling cross-tool and cross-platform correlation of compliance data. Current release: CCE v5 (Dec 2025). Not all security-relevant settings have a CCE; some directives in this playbook are best practices without a formal CCE assignment.
+- **[C2S](https://aws.amazon.com/compliance/c2s-resources/)** (Commercial Cloud Services) -- a classified AWS region subject to ODNI/IC security requirements; C2S baselines overlap heavily with CIS and DISA STIG controls.
 
 ## Target Hosts
 
@@ -60,7 +66,9 @@ All applied via `ansible.builtin.replace` against individual directives:
 | --             | GatewayPorts           | no                             |
 | --             | PermitTunnel           | no                             |
 | --             | PasswordAuthentication | no                             |
-| --             | PermitRootLogin        | no                             |
+| CCE-80901-2    | PermitRootLogin        | no                             |
+
+Directives marked `--` are SSH best practices without a formal CCE assignment in NIST's CCE database.
 
 SSHD restarted with `async: 60 / poll: 1` to avoid connection drops.
 
@@ -108,7 +116,7 @@ Packages removed if present (conditional on `ansible_facts.available_packages`):
 | CCE-80325-4 | `named`                                                          |
 | CCE-80277-7 | `smb`                                                            |
 | CCE-80300-7 | `httpd`, `httpd-devel`, `micro-httpd`, `mini-httpd`              |
-| --          | `nginx`, `nginx-common`, `nginx-core`, `nginx-full`, `nginx-light` |
+| --          | `nginx`, `nginx-common`, `nginx-core`, `nginx-full`, `nginx-light` (no CCE; CIS has a [separate nginx benchmark](https://www.cisecurity.org/benchmark/nginx)) |
 | CCE-80269-4 | `rhnsd`                                                          |
 | CCE-80285-0 | `squid`, `squid-common`                                          |
 | CCE-80330-4 | `dhcpd`, `udhcpd`                                                |
