@@ -109,7 +109,7 @@ Packages removed if present (conditional on `ansible_facts.available_packages`):
 | CCE-27399-5 | `ypserv`                                                         |
 | CCE-27432-4 | `talk`                                                           |
 | CCE-27210-4 | `talk-server`                                                    |
-| CCE-27218-7 | `xorg-x11-server-common`                                        |
+| CCE-27218-7 | `xorg-x11-server-common`                                         |
 | CCE-80293-4 | `openldap-servers`, `openldap`                                   |
 | CCE-80338-7 | `avahi-daemon`, `avahi`                                          |
 | CCE-80274-4 | `snmpd`, `net-snmp`                                              |
