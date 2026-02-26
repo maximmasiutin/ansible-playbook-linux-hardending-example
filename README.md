@@ -4,9 +4,9 @@ Vagrant/VirtualBox lab applying CIS, CCE, and C2S hardening controls across four
 
 ## Standards Referenced
 
-- **[CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks/)** (Center for Internet Security) -- consensus-based security configuration guidelines developed by government, industry, and academia. CIS publishes hardening profiles for operating systems, middleware, and applications.
-- **[CCE](https://ncp.nist.gov/cce)** (Common Configuration Enumeration) -- a NIST-maintained scheme assigning unique identifiers (e.g., CCE-80901-2) to discrete system configuration settings, enabling cross-tool and cross-platform correlation of compliance data. Current release: CCE v5 (Dec 2025). Not all security-relevant settings have a CCE; some directives in this playbook are best practices without a formal CCE assignment.
-- **[C2S](https://aws.amazon.com/federal/secret-cloud/)** (Commercial Cloud Services) -- a classified AWS region subject to ODNI/IC security requirements; C2S baselines overlap heavily with CIS and DISA STIG controls.
+- **[CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks/)** (Center for Internet Security) consensus-based security configuration guidelines developed by government, industry, and academia. CIS publishes hardening profiles for operating systems, middleware, and applications.
+- **[CCE](https://ncp.nist.gov/cce)** (Common Configuration Enumeration) a NIST-maintained scheme assigning unique identifiers (e.g., CCE-80901-2) to discrete system configuration settings, enabling cross-tool and cross-platform correlation of compliance data. Current release: CCE v5 (Dec 2025). Not all security-relevant settings have a CCE; some directives in this playbook are best practices without a formal CCE assignment.
+- **[C2S](https://aws.amazon.com/federal/secret-cloud/)** (Commercial Cloud Services) a classified AWS region subject to ODNI/IC security requirements; C2S baselines overlap heavily with CIS and DISA STIG controls.
 
 ## Target Hosts
 
@@ -36,7 +36,7 @@ Molecule config: `project-role/molecule/default/molecule.yml` (Vagrant driver, c
 
 Single flat playbook, `hosts: all`, `become: yes`.
 
-**Bootstrap phase:** `gather_facts: no` initially -- Alpine has no Python by default. Installs Python via `raw` module per distro (`apt`/`yum`/`apk`), then runs `gather_facts` and `package_facts`. Gentoo runs `emerge --changed-use --deep @world --backtrack=50`, installs `gentoolkit`, and runs `emerge --depclean` before fact gathering (this step is slow).
+**Bootstrap phase:** `gather_facts: no` initially. Alpine has no Python by default. Installs Python via `raw` module per distro (`apt`/`yum`/`apk`), then runs `gather_facts` and `package_facts`. Gentoo runs `emerge --changed-use --deep @world --backtrack=50`, installs `gentoolkit`, and runs `emerge --depclean` before fact gathering (this step is slow).
 
 All package operations are conditional on `ansible_facts.available_packages` / `ansible_facts.packages`, making the playbook cross-distro safe.
 
@@ -68,7 +68,7 @@ All applied via `ansible.builtin.replace` against individual directives:
 | --             | PasswordAuthentication | no                             |
 | CCE-80901-2    | PermitRootLogin        | no                             |
 
-Directives marked `--` are SSH best practices without a formal CCE assignment in NIST's CCE database.
+Directives marked `b/p` are SSH best practices without a formal CCE assignment in NIST's CCE database.
 
 SSHD restarted with `async: 60 / poll: 1` to avoid connection drops.
 
@@ -97,7 +97,7 @@ Sets `gpgcheck=1` in both `/etc/yum.conf` and `/etc/dnf/dnf.conf`.
 | CCE-27336-7 | `rlogin.socket` stopped/disabled              |
 | CCE-27408-4 | `rexec.socket` stopped/disabled               |
 | CCE-27406-8 | `/etc/hosts.equiv`, `~/.rhosts` deleted       |
-| --          | `rsh`, `rsh-client`, `rsh-server` removed     |
+| b/p         | `rsh`, `rsh-client`, `rsh-server` removed     |
 
 ### Package Removal
 
@@ -105,7 +105,7 @@ Packages removed if present (conditional on `ansible_facts.available_packages`):
 
 | CCE ID      | Packages                                                         |
 |-------------|------------------------------------------------------------------|
-| --          | `autofs`                                                         |
+| b/p         | `autofs`                                                         |
 | CCE-27399-5 | `ypserv`                                                         |
 | CCE-27432-4 | `talk`                                                           |
 | CCE-27210-4 | `talk-server`                                                    |
@@ -116,7 +116,7 @@ Packages removed if present (conditional on `ansible_facts.available_packages`):
 | CCE-80325-4 | `named`                                                          |
 | CCE-80277-7 | `smb`                                                            |
 | CCE-80300-7 | `httpd`, `httpd-devel`, `micro-httpd`, `mini-httpd`              |
-| --          | `nginx`, `nginx-common`, `nginx-core`, `nginx-full`, `nginx-light` (no CCE; CIS has a [separate nginx benchmark](https://www.cisecurity.org/benchmark/nginx)) |
+| b/p         | `nginx`, `nginx-common`, `nginx-core`, `nginx-full`, `nginx-light` (no CCE; CIS has a [separate nginx benchmark](https://www.cisecurity.org/benchmark/nginx)) |
 | CCE-80269-4 | `rhnsd`                                                          |
 | CCE-80285-0 | `squid`, `squid-common`                                          |
 | CCE-80330-4 | `dhcpd`, `udhcpd`                                                |
