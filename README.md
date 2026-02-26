@@ -4,8 +4,8 @@ Vagrant/VirtualBox lab applying CIS, CCE, and C2S hardening controls across four
 
 ## Standards Referenced
 
-- **[CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks/)** (Center for Internet Security) consensus-based security configuration guidelines developed by government, industry, and academia. CIS publishes hardening profiles for operating systems, middleware, and applications.
-- **[CCE](https://ncp.nist.gov/cce)** (Common Configuration Enumeration) a NIST-maintained scheme assigning unique identifiers (e.g., CCE-80901-2) to discrete system configuration settings, enabling cross-tool and cross-platform correlation of compliance data. Current release: CCE v5 (Dec 2025). Not all security-relevant settings have a CCE; some directives in this playbook are best practices without a formal CCE assignment.
+- **[CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks/)** (Center for Internet Security) A consensus-based security configuration guidelines developed by government, industry, and academia. CIS publishes hardening profiles for operating systems, middleware, and applications.
+- **[CCE](https://ncp.nist.gov/cce)** (Common Configuration Enumeration) A NIST-maintained scheme assigning unique identifiers (e.g., CCE-80901-2) to discrete system configuration settings, enabling cross-tool and cross-platform correlation of compliance data. Current release: CCE v5 (Dec 2025). Not all security-relevant settings have a CCE; some directives in this playbook are best practices without a formal CCE assignment.
 - **[C2S](https://aws.amazon.com/federal/secret-cloud/)** (Commercial Cloud Services) a classified AWS region subject to ODNI/IC security requirements; C2S baselines overlap heavily with CIS and DISA STIG controls.
 
 ## Target Hosts
