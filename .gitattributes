@@ -1,0 +1,4 @@
+*.yaml text eol=lf
+*.yml text eol=lf
+*.bash text eol=lf
+Vagrantfile text eol=lf

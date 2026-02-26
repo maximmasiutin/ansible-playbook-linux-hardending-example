@@ -1,0 +1,691 @@
+---
+
+- name: "Lab #1 - System Hardening"
+  # This playbook implements security controls based on:
+  # - CIS Benchmarks: https://www.cisecurity.org/cis-benchmarks/
+  # - CCE Standards: https://nvd.nist.gov/config/cce/index
+  # - C2S Baseline: https://aws.amazon.com/compliance/c2s-resources/
+  hosts: all
+  become: yes
+
+  # we first disable 'gather_facts', because it requires Python and fails on Alpine Linux where no Python is installed by default
+  gather_facts: no
+
+  tasks:
+
+    # the Raw module does not require Python, unlike the other modules
+
+    - name: "#0 Install python using the raw module on RedHat 'yum' package manager"
+      ansible.builtin.raw: "yum -y install python38"
+      when: inventory_hostname in groups['redhat']
+
+    - name: "#0 Install python using the raw module on Debian 'apt' package manager"
+      ansible.builtin.raw: "apt-get -y update; apt-get -y install python-is-python3"
+      when: inventory_hostname in groups['debian']
+
+    - name: "#0 Install python using the raw module on APK (Alpine Linux) package manager"
+      ansible.builtin.raw: "apk update; apk add python3"
+      when: inventory_hostname in groups['apk']
+
+    - name: "Gentoo linux specific setup"
+      block:
+
+        - name: "#0 Update the modules Gentoo Linux with --backtrack=50 (it takes a few minutes, seriously!)"
+          # otherwise app-portage/gentoolkit or other modules won't install due to dependency error
+          ansible.builtin.raw: "emerge --changed-use --deep @world --backtrack=50"
+
+        # Gentoo Linux always have Python installed, because it is used by the Portage package manager
+
+        - name: "#0 Install the 'gentoolkit' on Gentoo"
+          # otherwise the ansible.builtin.package module would not work because it won't find a binary
+          ansible.builtin.raw: "emerge app-portage/gentoolkit"
+
+        - name: "#0 Clean old packages on Gentoo"
+          # otherwise the ansible.builtin.package module would not work because it won't find a binary
+          ansible.builtin.raw: "emerge --depclean"
+
+      when: inventory_hostname in groups['portage']
+
+    # Now, when we have Python installed, we can gather facts. This sets the variables like 'ansible_distribution'
+    - name: "Collect the facts after we have installed Python"
+      ansible.builtin.gather_facts:
+
+    - name: "Get installed package information"
+      package_facts:
+        need_package_details: yes
+        all_available: no
+
+    - name: "Get available package information"
+      package_facts:
+        need_package_details: yes
+        all_available: yes
+
+#    - name: "Debug: List Installed packages"
+#      ansible.builtin.debug:
+#        msg: "{{ ansible_facts.packages }}"
+
+#    - name: "Debug: List Available packages"
+#      ansible.builtin.debug:
+#        msg: "{{ ansible_facts.available_packages }}"
+
+    - name: "#1 Set timezone to Europe/Chisinau the stadard way"
+      community.general.timezone:
+        name: 'Europe/Chisinau'
+      register: set_timezone_result
+      ignore_errors: true
+
+    - name: "#1 Check whether the file 'Chisinau' exists"
+      ansible.builtin.stat:
+        path: '/usr/share/zoneinfo/Europe/Chisinau'
+      register: chisinau_timezone_file
+
+    - name: "#1 Check whether the file 'localtime' exists"
+      ansible.builtin.stat:
+        path: '/etc/localtime'
+      register: etc_localtime_file
+
+    - name: "#1 Set timezone to Europe/Chisinau on via the file copy if the standard way fails"
+      ansible.builtin.raw: "mv /etc/localtime /etc/localtime.bak; ln -s /usr/share/zoneinfo/Europe/Chisinau /etc/localtime"
+      when: (set_timezone_result is failed) and (chisinau_timezone_file.stat.exists) and (etc_localtime_file.stat.exists)
+
+    - name: "Configure the NTP protocol for the systemd-timesyncd"
+      block:
+        - name: "#2 Remove the 'Chrony' NTP client"
+          ansible.builtin.package:
+            name: chrony
+            state: absent
+          when: "'chrony' in ansible_facts.available_packages"
+
+        - name: "#2 Remove the 'ntp' NTP client"
+          ansible.builtin.package:
+            name: ntp
+            state: absent
+          when: "'ntp' in ansible_facts.available_packages"
+
+        - name: "#2 Install the systemd-timesyncd NTP client"
+          ansible.builtin.package:
+            name: systemd-timesyncd
+            state: present
+
+        - name: "#2 Configure the ntp client"
+          community.general.ini_file:
+            path: /etc/systemd/timesyncd.conf
+            section: 'Time'
+            option: 'NTP'
+            value: 'md.pool.ntp.org'
+            no_extra_spaces: yes
+
+        - name: "#2 Enable the ntp service"
+          ansible.builtin.service:
+            name: systemd-timesyncd
+            enabled: yes
+
+        - name: "#2 Start the ntp service if was not installed"
+          async: 60
+          poll: 1
+          ansible.builtin.service:
+            name: systemd-timesyncd
+            state: started
+          when: "'systemd-timesyncd' not in ansible_facts.packages"
+
+        - name: "#2 Restart the ntp service after the config change if was installed"
+          async: 60
+          poll: 1
+          ansible.builtin.service:
+            name: systemd-timesyncd
+            state: restarted
+          when: "'systemd-timesyncd' in ansible_facts.packages"
+
+      when: "'systemd-timesyncd' in ansible_facts.available_packages"
+
+    - name: "#2 Configure the NTP protocol for the chrony"
+      block:
+
+        - name: "#2 chrony: Remove the 'ntp' NTP client"
+          ansible.builtin.package:
+            name: ntp
+            state: absent
+          when: "'ntp' in ansible_facts.available_packages"
+
+        - name: "#2 chrony: Install the chrony NTP client"
+          ansible.builtin.package:
+            name: chrony
+            state: present
+
+        - name: "#2 chrony: Get long path"
+          ansible.builtin.stat:
+            path: '/etc/chrony/chrony.conf'
+          register: chrony_long
+
+        - name: "#2 chrony: Get short path"
+          ansible.builtin.stat:
+            path: '/etc/chrony.conf'
+          register: chrony_short
+
+        - name: "#2 chrony-long: Remove old servers from config"
+          when: chrony_long.stat.exists
+          ansible.builtin.lineinfile:
+            path: /etc/chrony/chrony.conf
+            regexp: '^\s*(server|pool) .+$'
+            state: absent
+
+        - name: "#2 chrony-long: Add new server to config"
+          ansible.builtin.lineinfile:
+            path: /etc/chrony/chrony.conf
+            line: "pool md.pool.ntp.org iburst"
+          when: chrony_long.stat.exists
+
+        - name: "#2 chrony-short: Remove old servers from config"
+          ansible.builtin.lineinfile:
+            path: /etc/chrony.conf
+            regexp: '^\s*(server|pool) .+$'
+            state: absent
+          when: chrony_short.stat.exists
+
+        - name: "#2 chrony-short: Add new server to config"
+          ansible.builtin.lineinfile:
+            path: /etc/chrony.conf
+            line: "pool md.pool.ntp.org iburst"
+          when: chrony_short.stat.exists
+
+        - name: "#2 chrony: Enable theservice"
+          ansible.builtin.service:
+            name: chronyd
+            enabled: yes
+
+        - name: "#2 Restart the chrony NTP client"
+          ansible.builtin.service:
+            name: chronyd
+            state: restarted
+          when: "'chrony' in ansible_facts.packages"
+
+        - name: "#2 Start the chrony NTP client"
+          when: "'chrony' not in ansible_facts.packages"
+          ansible.builtin.service:
+            name: chronyd
+            state: started
+
+      when: "('systemd-timesyncd' not in ansible_facts.available_packages) and ('chrony' in ansible_facts.available_packages)"
+
+    - name: "#3 Install fail2ban"
+      ansible.builtin.package:
+        name: fail2ban
+      when: "'fail2ban' in ansible_facts.available_packages"
+
+    - name: "[C2S/CIS](https://www.cisecurity.org/cis-benchmarks/) [CCE](https://nvd.nist.gov/config/cce/index)-80645-5 sshd loglevel=INFO"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?LogLevel\s+.*$'
+        replace: 'LogLevel INFO'
+
+    - name: "C2S/CIS CCE-27471-2 Disable empty passwords"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?PermitEmptyPasswords\s+.*$'
+        replace: 'PermitEmptyPasswords no'
+
+    - name: "C2S/CIS CCE-27082-7 Limit the number of alive messages"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?ClientAliveCountMax\s+.*$'
+        replace: 'ClientAliveCountMax 0'
+
+    - name: "C2S/CIS CCE-27433-2 Shorten the client inactivity interval"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?ClientAliveInterval\s+.*$'
+        replace: 'ClientAliveInterval 300'
+
+    - name: "C2S/CIS CCE-27455-5 Use only FIPS-approved hash functions, except SHA-1"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?MACs\s+.*$'
+        replace: 'MACs hmac-sha2-512,hmac-sha2-256'
+
+    - name: "C2S/CIS CCE-27320-1 Force version 2 of the SSH protocol"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?Protocol\s+.*$'
+        replace: 'Protocol 2'
+
+    - name: "C2S/CIS CCE-27377-1 Ignore rhosts"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?IgnoreRhosts\s+.*$'
+        replace: 'IgnoreRhosts yes'
+
+    - name: "C2S/CIS CCE-80226-4 Disable encrypted X.11 forwarding"
+      # X11 forwarding allows remote GUI applications but increases the SSH attack surface.
+      # Hardening standards typically recommend disabling it unless explicitly required.
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?X11Forwarding\s+.*$'
+        replace: 'X11Forwarding no'
+
+    - name: "SSH disable gateway ports"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?GatewayPorts\s+.*$'
+        replace: 'GatewayPorts no'
+
+    - name: "SSH disable tunnel"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?PermitTunnel\s+.*$'
+        replace: 'PermitTunnel no'
+
+    - name: "SSH disable password authentication"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?PasswordAuthentication\s+.*$'
+        replace: 'PasswordAuthentication no'
+
+    - name: "SSH disable root login"
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?PermitRootLogin\s+.*$'
+        replace: 'PermitRootLogin no'
+
+    - name: "Restart the SSH daemon service after configuration"
+      async: 60
+      poll: 1
+      ansible.builtin.service:
+        name: sshd
+        state: restarted
+
+    - name: "#5 remove the autofs package"
+      when: "'autofs' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: autofs
+        state: absent
+
+    - name: "#6 Configure grub"
+      when: "inventory_hostname not in groups['apk']"
+      ansible.builtin.replace:
+        path: /etc/default/grub
+        regexp: '^\s*#?GRUB_CMDLINE_LINUX\s*=.*$'
+        replace: 'GRUB_CMDLINE_LINUX="ipv6.disable=1 audit=1 audit_backlog_limit=8192"'
+      register: configure_grub
+
+    - name: "#6 rebuild grub on Debian"
+      when: (inventory_hostname in groups['debian']) and (configure_grub is changed)
+      ansible.builtin.raw: update-grub
+
+    - name: "#6 rebuild grub on RedHat"
+      when: inventory_hostname in groups['redhat'] and (configure_grub is changed)
+      ansible.builtin.raw: 'grub2-mkconfig -o "$(readlink -e /etc/grub2.conf)"'
+
+    - name: "#7 Force gpg check for RPM packages in RedHat in yum.conf"
+      when: inventory_hostname in groups['redhat']
+      community.general.ini_file:
+        path: "{{ item }}"
+        section: 'main'
+        option: 'gpgcheck'
+        value: '1'
+        no_extra_spaces: yes
+      with_items:
+        - '/etc/yum.conf'
+        - '/etc/dnf/dnf.conf'
+
+    - name: "#8 Install and configure the dnf-automatic, if available"
+      block:
+
+        - name: "#8 Install the dnf-automatic package"
+          ansible.builtin.package:
+            name: dnf-automatic
+            state: present
+
+        - name: "#8 Enable the updates in the config"
+          ansible.builtin.replace:
+            path: /etc/dnf/automatic.conf
+            regexp: '^\s*#?apply_updates\s*=.*$'
+            replace: 'apply_updates = yes'
+
+        - name: "#8 Enable the updates service"
+          ansible.builtin.service:
+            name: dnf-automatic
+            enabled: yes
+
+        - name: "#8 Start the updates service"
+          ignore_errors: yes
+          async: 180
+          poll: 2
+          ansible.builtin.service:
+            name: dnf-automatic
+            state: started
+
+      when: "'dnf-automatic' in ansible_facts.available_packages"
+
+    - name: "#8 Install and configure the unattended-upgrades, if available"
+      block:
+
+        - name: "Install the unattended-upgrades module"
+          ansible.builtin.package:
+            name: unattended-upgrades
+            state: present
+
+        - name: "#8 Patch unattended-upgrades config (#1)"
+          ansible.builtin.replace:
+            path: /etc/apt/apt.conf.d/50unattended-upgrades
+            regexp: '^.*\{distro_codename\}-updates.*$'
+            replace: '        "${distro_id}:${distro_codename}-updates";'
+
+        - name: "#8 Patch unattended-upgrades config (#2)"
+          ansible.builtin.replace:
+            path: /etc/apt/apt.conf.d/50unattended-upgrades
+            regexp: '^.*Unattended-Upgrade::InstallOnShutdown\s+".*$'
+            replace: 'Unattended-Upgrade::InstallOnShutdown "true";'
+
+        - name: "#8 Patch unattended-upgrades config (#3)"
+          ansible.builtin.replace:
+            path: /etc/apt/apt.conf.d/50unattended-upgrades
+            regexp: '^.*Unattended-Upgrade::Automatic-Reboot\s+".*$'
+            replace: 'Unattended-Upgrade::Automatic-Reboot "true";'
+
+        - name: "#8 Patch unattended-upgrades config (#4)"
+          ansible.builtin.replace:
+            path: /etc/apt/apt.conf.d/50unattended-upgrades
+            regexp: '^.*Unattended-Upgrade::Verbose\s+".*$'
+            replace: 'Unattended-Upgrade::Verbose "true";'
+
+        - name: "#8 restart the unattended-upgrades if it was installed before we run Ansible"
+          when: "'unattended-upgrades' in ansible_facts.packages"
+          async: 60
+          poll: 1
+          ansible.builtin.service:
+            name: unattended-upgrades
+            state: restarted
+
+        - name: "#8 start the unattended-upgrades if it was not installed before we run Ansible"
+          when: "'unattended-upgrades' not in ansible_facts.packages"
+          async: 60
+          poll: 1
+          ansible.builtin.service:
+            name: unattended-upgrades
+            state: started
+
+      when: "('unattended-upgrades' in ansible_facts.available_packages) and not ('dnf-automatic' in ansible_facts.available_packages)"
+
+    - name: "C2S/CIS CCE-27337-5 disable rsh.socket"
+      ansible.builtin.raw: 'systemctl stop rsh.socket 2>/dev/null; systemctl disable rsh.socket 2>/dev/null; /bin/true'
+      ignore_errors: yes
+
+    - name: "delete rsh"
+      when: "'rsh' in ansible_facts.packages"
+      ansible.builtin.package:
+        name: rsh
+        state: absent
+
+    - name: "delete rsh-client"
+      when: "'rsh-client' in ansible_facts.packages"
+      ansible.builtin.package:
+        name: rsh-client
+        state: absent
+
+    - name: "delete rsh-server"
+      when: "'rsh-server' in ansible_facts.packages"
+      ansible.builtin.package:
+        name: rsh-server
+        state: absent
+
+    - name: "C2S/CIS CCE-27336-7 disable rlogin.socket"
+      ansible.builtin.raw: 'systemctl stop rlogin.socket 2>/dev/null; systemctl disable rlogin.socket 2>/dev/null; /bin/true'
+      ignore_errors: yes
+
+    - name: "C2S/CIS CCE-27408-4 disable rexcec.socket"
+      ansible.builtin.raw: 'systemctl stop rexec.socket 2>/dev/null; systemctl disable rexec.socket 2>/dev/null; /bin/true'
+      ignore_errors: yes
+
+    - name: "C2S/CIS CCE-27406-8"
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        /etc/hosts.equiv
+        ~/.rhosts
+        /root/.rhosts
+        /home/vagrant/.rhosts
+
+    - name: "C2S/CIS CCE-27399-5 ypserv"
+      when: "'ypserv' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: ypserv
+        state: absent
+
+    - name: "C2S/CIS CCE-27432-4 talk"
+      when: "'talk' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: talk
+        state: absent
+
+    - name: "C2S/CIS CCE-27210-4 talk-server"
+      when: "'talk-server' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: talk-server
+        state: absent
+
+    - name: "C2S/CIS CCE-27218-7 xorg-x11-server-common"
+      when: "'xorg-x11-server-common' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: xorg-x11-server-common
+        state: absent
+
+    - name: "C2S/CIS CCE-80293-4 openldap-servers"
+      when: "'openldap-servers' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: openldap-servers
+        state: absent
+
+    - name: "C2S/CIS CCE-80293-4 openldap"
+      when: "'openldap' in ansible_facts.available_packages"
+      # We have to ignore errors here because of the "Depsolve Error" "The operation would result in removing the following protected packages: sudo" -- This happens on Centos
+      ignore_errors: yes
+      ansible.builtin.package:
+        name: openldap
+        state: absent
+
+    - name: "C2S/CIS CCE-80338-7 avahi-daemon"
+      when: "'avahi-daemon' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: avahi-daemon
+        state: absent
+
+    - name: "C2S/CIS CCE-80338-7 avahi"
+      when: "'avahi' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: avahi
+        state: absent
+
+    - name: "C2S/CIS CCE-80274-4 snmpd"
+      when: "'snmpd' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: snmpd
+        state: absent
+
+    - name: "C2S/CIS CCE-80274-4 net-snmp"
+      when: "'net-snmp' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: net-snmp
+        state: absent
+
+    - name: "C2S/CIS CCE-80325-4 named"
+      when: "'named' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: named
+        state: absent
+
+    - name: "C2S/CIS CCE-80277-7 smb"
+      when: "'smb' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: smb
+        state: absent
+
+    - name: "C2S/CIS 80300-7 httpd"
+      when: "'httpd' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: httpd
+        state: absent
+
+    - name: "C2S/CIS 80300-7 httpd-devel"
+      when: "'httpd-devel' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: httpd-devel
+        state: absent
+
+    - name: "C2S/CIS 80300-7 micro-httpd"
+      when: "'micro-httpd' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: micro-httpd
+        state: absent
+
+    - name: "C2S/CIS 80300-7 mini-httpd"
+      when: "'mini-httpd' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: mini-httpd
+        state: absent
+
+    - name: "Remove nginx"
+      when: "'nginx' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: nginx
+        state: absent
+
+    - name: "Remove nginx-common"
+      when: "'nginx-common' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: nginx-common
+        state: absent
+
+    - name: "Remove nginx-core"
+      when: "'nginx-core' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: nginx-core
+        state: absent
+
+    - name: "Remove nginx-full"
+      when: "'nginx-full' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: nginx-full
+        state: absent
+
+    - name: "Remove nginx-light"
+      when: "'nginx-light' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: nginx-light
+        state: absent
+
+    - name: "CIS CCE-80269-4 rhnsd"
+      when: "'rhnsd' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: rhnsd
+        state: absent
+
+    - name: "CIS CCE-80285-0 squid"
+      when: "'squid' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: squid
+        state: absent
+
+    - name: "CIS CCE-80285-0 squid-common"
+      when: "'squid-common' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: squid-common
+        state: absent
+
+    - name: "CIS CCE-80330-4 dhcpd"
+      when: "'dhcpd' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: dhcpd
+        state: absent
+
+    - name: "CIS CCE-80330-4 udhcpd"
+      when: "'udhcpd' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: udhcpd
+        state: absent
+
+    - name: "CIS CCE-80294-2 dovecot"
+      when: "'dovecot' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: dovecot
+        state: absent
+
+    - name: "CIS CCE-80294-2 dovecot-core"
+      when: "'dovecot-core' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: dovecot-core
+        state: absent
+
+    - name: "CIS CCE-80294-2 dovecot-dev"
+      when: "'dovecot-dev' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: dovecot-dev
+        state: absent
+
+    - name: "CIS CCE-80230-6 rpcbind"
+      when: "'rpcbind' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: rpcbind
+        state: absent
+
+    - name: "CIS CCE-80237-1 nfs"
+      when: "'nfs' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: nfs
+        state: absent
+
+    - name: "CIS CCE-80237-1 nfs-common"
+      when: "'nfs-common' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: nfs-common
+        state: absent
+
+    - name: "CIS CCE-80237-1 nfs-utils"
+      when: "'nfs-utils' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: nfs-utils
+        state: absent
+
+    - name: "CIS CCE-80282-7 cups"
+      when: "'cups' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: cups
+        state: absent
+
+    - name: "CIS CCE-80282-7 cups-daemon"
+      when: "'cups-daemon' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: cups-daemon
+        state: absent
+
+    - name: "CIS CCE-80282-7 cups-server-common"
+      when: "'cups-server-common' in ansible_facts.available_packages"
+      ansible.builtin.package:
+        name: cups-server-common
+        state: absent
+
+    - name: "#10 check the motd file"
+      ansible.builtin.stat:
+        path: '/etc/motd'
+      register: motd_file
+
+    - name: "#10 modify the motd file"
+      ansible.builtin.lineinfile:
+        path: '/etc/motd'
+        line: "This system is for the use of authorised users only. Individuals using this computer system without authority, or in excess of their authority, are subject to having all of their activities on this system monitored and recorded by system personnel. In the course of monitoring individuals improperly using this system, or in the course of system maintenance, the activities of authorised users may also be monitored. Anyone using this system expressly consents to such monitoring and is advised that if such monitoring reveals possible criminal activity, system personnel may provide the evidence of such monitoring to law enforcement officials."
+        state: present
+      when: motd_file.stat.exists
+
+    - name: "Update all packages on RedHat using the 'yum' package manager"
+      ansible.builtin.raw: "yum -y update"
+      when: inventory_hostname in groups['redhat']
+
+    - name: "Update all packages on Debian using the 'apt' package manager"
+      # we have already done "apt-get update" at the start of this ansible script
+      ansible.builtin.raw: "apt-get -y dist-upgrade"
+      when: inventory_hostname in groups['debian']
+
+    - name: "Update all packages on Alpine Linux using the 'apk' package manager"
+      # we have already done "apk update" at the start of this ansible script
+      ansible.builtin.raw: "apk upgrade"
+      when: inventory_hostname in groups['apk']

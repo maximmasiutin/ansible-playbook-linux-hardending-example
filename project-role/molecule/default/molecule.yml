@@ -1,0 +1,44 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: vagrant
+  provider:
+    name: virtualbox
+platforms:
+  - name: ubuntu
+    box: ubuntu/focal64
+    groups:
+      - debian
+    memory: 2048
+    cpus: 2
+  - name: centos
+    box: centos/8
+    groups:
+      - redhat
+    memory: 2048
+    cpus: 2
+  - name: alpine
+    box: generic/alpine38
+    groups:
+      - apk
+    memory: 2048
+    cpus: 2
+  - name: gentoo
+    box: generic/gentoo
+    groups:
+      - portage
+    memory: 4096
+    cpus: 4
+provisioner:
+  name: ansible
+  lint:
+    name: ansible-lint
+  playbooks:
+    converge: ../../../hardening.yaml
+verifier:
+  name: ansible
+  lint:
+    name: ansible-lint
+lint: |
+  yamllint .
