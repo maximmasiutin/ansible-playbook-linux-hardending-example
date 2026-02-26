@@ -4,7 +4,7 @@
   # This playbook implements security controls based on:
   # - CIS Benchmarks: https://www.cisecurity.org/cis-benchmarks/
   # - CCE Standards: https://nvd.nist.gov/config/cce/index
-  # - C2S Baseline: https://aws.amazon.com/compliance/c2s-resources/
+  # - C2S Baseline: https://aws.amazon.com/federal/secret-cloud/
   hosts: all
   become: yes
 
